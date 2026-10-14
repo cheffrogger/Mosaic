@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type ChangeEvent } from 'react';
-import { applyColorReplacement, buildDemoPalette, calculateCropRect, cropImageData, type MaterialItem, type PaletteColor } from '@mosaic/core';
+import { applyColorReplacement, buildAdaptivePaletteFromPixels, buildDemoPalette, calculateCropRect, cropImageData, type MaterialItem, type PaletteColor } from '@mosaic/core';
 
 const DEFAULT_GRID_WIDTH = 32;
 const DEFAULT_GRID_HEIGHT = 32;
@@ -200,6 +200,7 @@ export default function App() {
   const [sectionHeight, setSectionHeight] = useState(DEFAULT_SECTION_HEIGHT);
   const [colorLimit, setColorLimit] = useState(DEFAULT_COLOR_LIMIT);
   const [mode, setMode] = useState<'balanced' | 'pixel-art'>('balanced');
+  const [imagePalette, setImagePalette] = useState<PaletteColor[]>(DEMO_PALETTE);
   const [selectedPaletteIds, setSelectedPaletteIds] = useState<string[]>(getPaletteSelection(DEMO_PALETTE.map((color) => color.id)));
   const [replacementSourceId, setReplacementSourceId] = useState(DEMO_PALETTE[0]?.id ?? '');
   const [replacementTargetId, setReplacementTargetId] = useState(DEMO_PALETTE[1]?.id ?? DEMO_PALETTE[0]?.id ?? '');
@@ -235,7 +236,7 @@ export default function App() {
   }, [project, gridWidth, gridHeight]);
 
   const materialTotal = useMemo(() => project?.materialList.reduce((sum, item) => sum + item.count, 0) ?? 0, [project]);
-  const activePalette = useMemo(() => DEMO_PALETTE.filter((color) => selectedPaletteIds.includes(color.id)), [selectedPaletteIds]);
+  const activePalette = useMemo(() => imagePalette.filter((color) => selectedPaletteIds.includes(color.id)), [imagePalette, selectedPaletteIds]);
   const effectiveCrop = useMemo(() => {
     if (!lastImageData) {
       return crop.width > 0 ? crop : null;
@@ -312,7 +313,7 @@ export default function App() {
       const next = current.includes(colorId)
         ? current.filter((id) => id !== colorId)
         : [...current, colorId];
-      return next.length === 0 ? [DEMO_PALETTE[0].id] : next;
+      return next.length === 0 ? [imagePalette[0]?.id ?? DEMO_PALETTE[0].id] : next;
     });
   };
 
@@ -398,6 +399,15 @@ export default function App() {
       setStatus(`Decoding ${file.name}...`);
       const { imageData, previewUrl } = await readImageFile(file);
       setLastImageData(imageData);
+      const generatedPalette = buildAdaptivePaletteFromPixels({
+        width: imageData.width,
+        height: imageData.height,
+        pixels: imageData.data,
+        targetCount: Math.max(12, Math.min(24, Math.round((gridWidth * gridHeight) / 12))),
+        basePalette: DEMO_PALETTE,
+      });
+      setImagePalette(generatedPalette);
+      setSelectedPaletteIds(generatedPalette.map((color) => color.id));
       const nextCrop = calculateCropRect({
         sourceWidth: imageData.width,
         sourceHeight: imageData.height,
@@ -665,6 +675,7 @@ export default function App() {
   };
 
   const headingLabel = `${project?.gridWidth ?? gridWidth}×${project?.gridHeight ?? gridHeight}`;
+  const paletteLimit = Math.max(DEMO_PALETTE.length, imagePalette.length);
 
   return (
     <main className="app-shell">
@@ -715,7 +726,7 @@ export default function App() {
           </label>
           <label>
             Color limit (K)
-            <input type="number" min={1} max={DEMO_PALETTE.length} value={colorLimit} onChange={(event) => setColorLimit(Math.max(1, Number(event.target.value) || 1))} />
+            <input type="number" min={1} max={paletteLimit} value={Math.min(colorLimit, paletteLimit)} onChange={(event) => setColorLimit(Math.max(1, Math.min(Number(event.target.value) || 1, paletteLimit)))} />
           </label>
           <label>
             Mode
@@ -755,7 +766,25 @@ export default function App() {
         <div className="panel">
           <h2>Source</h2>
           {project?.sourceImageUrl ? (
-            <img src={project.sourceImageUrl} alt="Selected source" className="source-preview" />
+            <div className="source-preview-wrap" style={{ position: 'relative', aspectRatio: `${project.pixelWidth || 1} / ${project.pixelHeight || 1}` }}>
+              <img src={project.sourceImageUrl} alt="Selected source" className="source-preview" style={{ objectFit: 'contain' }} />
+              {effectiveCrop && (
+                <div
+                  className="source-crop-overlay"
+                  style={{
+                    position: 'absolute',
+                    left: `${(effectiveCrop.x / Math.max(project.pixelWidth, 1)) * 100}%`,
+                    top: `${(effectiveCrop.y / Math.max(project.pixelHeight, 1)) * 100}%`,
+                    width: `${(effectiveCrop.width / Math.max(project.pixelWidth, 1)) * 100}%`,
+                    height: `${(effectiveCrop.height / Math.max(project.pixelHeight, 1)) * 100}%`,
+                    border: '2px solid rgba(255,255,255,0.95)',
+                    background: 'rgba(255,255,255,0.12)',
+                    boxShadow: '0 0 0 9999px rgba(0, 0, 0, 0.32)',
+                    borderRadius: '4px',
+                  }}
+                />
+              )}
+            </div>
           ) : (
             <div className="empty-box">No image loaded yet</div>
           )}
@@ -777,7 +806,7 @@ export default function App() {
         <div className="panel">
           <h3>Demo palette (local only)</h3>
           <div className="palette-grid">
-            {DEMO_PALETTE.map((color: PaletteColor) => (
+            {imagePalette.map((color: PaletteColor) => (
               <label key={color.id} className="swatch-row clickable">
                 <input type="checkbox" checked={selectedPaletteIds.includes(color.id)} onChange={() => togglePaletteColor(color.id)} />
                 <span className="swatch" style={{ backgroundColor: color.hex }} />
@@ -813,7 +842,7 @@ export default function App() {
             <label>
               Replace
               <select value={replacementSourceId} onChange={(event) => setReplacementSourceId(event.target.value)}>
-                {(project?.palette.length ? project.palette : DEMO_PALETTE).map((color) => (
+                {(project?.palette.length ? project.palette : imagePalette).map((color) => (
                   <option key={color.id} value={color.id}>{color.name}</option>
                 ))}
               </select>
@@ -821,7 +850,7 @@ export default function App() {
             <label>
               With
               <select value={replacementTargetId} onChange={(event) => setReplacementTargetId(event.target.value)}>
-                {(project?.palette.length ? project.palette : DEMO_PALETTE).map((color) => (
+                {(project?.palette.length ? project.palette : imagePalette).map((color) => (
                   <option key={color.id} value={color.id}>{color.name}</option>
                 ))}
               </select>

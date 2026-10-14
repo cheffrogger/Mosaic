@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   applyColorReplacement,
+  buildAdaptivePaletteFromPixels,
   buildDemoPalette,
   calculateCropRect,
   calculateSectionLayout,
@@ -80,6 +81,38 @@ describe('mosaic core', () => {
     expect(crop.y).toBeGreaterThanOrEqual(0);
     expect(crop.x + crop.width).toBeLessThanOrEqual(1200);
     expect(crop.y + crop.height).toBeLessThanOrEqual(900);
+  });
+
+  it('builds a richer adaptive palette from source image colors', () => {
+    const width = 8;
+    const height = 8;
+    const rgba = new Uint8ClampedArray(width * height * 4);
+
+    for (let y = 0; y < height; y += 1) {
+      for (let x = 0; x < width; x += 1) {
+        const index = (y * width + x) * 4;
+        const red = x < 4 ? 255 : 0;
+        const green = y < 4 ? 255 : 0;
+        const blue = (x + y) % 2 === 0 ? 255 : 0;
+        rgba[index] = red;
+        rgba[index + 1] = green;
+        rgba[index + 2] = blue;
+        rgba[index + 3] = 255;
+      }
+    }
+
+    const palette = buildAdaptivePaletteFromPixels({
+      width,
+      height,
+      pixels: rgba,
+      targetCount: 12,
+      basePalette: buildDemoPalette(),
+    });
+
+    expect(palette.length).toBeGreaterThanOrEqual(8);
+    expect(palette.length).toBeLessThanOrEqual(12);
+    expect(palette.some((color) => color.hex.toLowerCase() === '#ff0000')).toBe(true);
+    expect(palette.some((color) => color.hex.toLowerCase() === '#00ff00')).toBe(true);
   });
 
   it('respects color limits and pixel-art mode', () => {

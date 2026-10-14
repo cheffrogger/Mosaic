@@ -223,6 +223,115 @@ export function buildDemoPalette(): PaletteColor[] {
   }));
 }
 
+export function buildAdaptivePaletteFromPixels({
+  width,
+  height,
+  pixels,
+  targetCount = 12,
+  basePalette = buildDemoPalette(),
+}: {
+  width: number;
+  height: number;
+  pixels: Uint8ClampedArray;
+  targetCount?: number;
+  basePalette?: PaletteColor[];
+}): PaletteColor[] {
+  if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) {
+    throw new Error('Invalid image size');
+  }
+
+  const safeTargetCount = Math.max(4, Math.min(32, Number.isFinite(targetCount) ? targetCount : 12));
+  const counts = new Map<string, { rgb: RGBColor; count: number }>();
+  const stride = Math.max(1, Math.floor(Math.sqrt((width * height) / Math.max(1, safeTargetCount * 8))));
+
+  for (let y = 0; y < height; y += stride) {
+    for (let x = 0; x < width; x += stride) {
+      const offset = (y * width + x) * 4;
+      const alpha = pixels[offset + 3] ?? 255;
+      if (alpha < 16) {
+        continue;
+      }
+
+      const r = Math.round((pixels[offset] ?? 0) / 32) * 32;
+      const g = Math.round((pixels[offset + 1] ?? 0) / 32) * 32;
+      const b = Math.round((pixels[offset + 2] ?? 0) / 32) * 32;
+      const key = `${r}-${g}-${b}`;
+      const current = counts.get(key);
+      if (current) {
+        current.count += 1;
+      } else {
+        counts.set(key, { rgb: { r, g, b }, count: 1 });
+      }
+    }
+  }
+
+  const sorted = [...counts.values()].sort((left, right) => right.count - left.count).map((entry) => entry.rgb);
+  const unique: RGBColor[] = [];
+  const seen = new Set<string>();
+
+  for (const rgb of sorted) {
+    const hex = rgbToHex(rgb);
+    if (seen.has(hex)) {
+      continue;
+    }
+    seen.add(hex);
+    unique.push(rgb);
+    if (unique.length >= safeTargetCount) {
+      break;
+    }
+  }
+
+  const palette: PaletteColor[] = unique.map((rgb, index) => ({
+    id: `adaptive-${index + 1}`,
+    name: `Adaptive ${index + 1}`,
+    hex: rgbToHex(rgb),
+    rgb,
+  }));
+
+  for (const color of basePalette) {
+    if (palette.length >= safeTargetCount) {
+      break;
+    }
+    if (!palette.some((item) => item.hex.toLowerCase() === color.hex.toLowerCase())) {
+      palette.push({
+        id: color.id,
+        name: color.name,
+        hex: color.hex,
+        rgb: color.rgb,
+      });
+    }
+  }
+
+  while (palette.length < safeTargetCount && palette.length < 32) {
+    const fallback = basePalette[palette.length % basePalette.length] ?? basePalette[0];
+    if (!palette.some((item) => item.hex.toLowerCase() === fallback.hex.toLowerCase())) {
+      palette.push({
+        id: `fallback-${palette.length + 1}`,
+        name: `Fallback ${palette.length + 1}`,
+        hex: fallback.hex,
+        rgb: fallback.rgb,
+      });
+    } else {
+      palette.push({
+        id: `fallback-${palette.length + 1}`,
+        name: `Fallback ${palette.length + 1}`,
+        hex: rgbToHex({
+          r: (palette.length * 53) % 255,
+          g: (palette.length * 97) % 255,
+          b: (palette.length * 131) % 255,
+        }),
+        rgb: {
+          r: (palette.length * 53) % 255,
+          g: (palette.length * 97) % 255,
+          b: (palette.length * 131) % 255,
+        },
+      });
+    }
+  }
+
+  return palette.slice(0, safeTargetCount);
+}
+
 export function generateMosaicFromPixels({
   width,
   height,
