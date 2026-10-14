@@ -20,6 +20,7 @@ Stand: 2026-10-13. **Bestätigt** = ausdrücklich aus dem aktuellen Auftrag. **A
 | D14 | Arbeitsentscheidung | Raster ≤256×256, Palette ≤256, Import ≤20 MiB/24 MP, Arbeitsbild ≤2.048 Kantenpixel, Projektdatei ≤64 MiB. Nach Messungen revidierbar. |
 | D15 | Arbeitsentscheidung | Neue bearbeitbare Projektwurzel `Mosaic/` im lokalen Spiegel. Übergeordnete synchronisierte AGENTS.md bleibt unangetastet. |
 | D16 | Arbeitsentscheidung | M1 nutzt eine klar als Demo gekennzeichnete lokale Palette, einen Worker-basierenden Core-Adapter und IndexedDB als lokale Projektpersistenz; keine echte Katalogquelle oder Cloud-Integration. |
+| D17 | Arbeitsentscheidung | M2 ergänzt eine explizite Raster-/Abschnitts- und Farb-Limit-Konfiguration im UI, mit Pixel-Art-Modus und komfortabler Wiederverwendung der aktuell gewählten Palette im lokalen Projekt-Store. |
 
 ## Kontext und offene Detailentscheidungen
 

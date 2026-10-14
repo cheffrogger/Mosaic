@@ -1,7 +1,22 @@
 import { generateMosaicFromPixels } from '@mosaic/core';
 
 self.onmessage = (event) => {
-  const { type, requestId, projectName, width, height, pixels, gridWidth, gridHeight, palette, backgroundColor } = event.data as {
+  const {
+    type,
+    requestId,
+    projectName,
+    width,
+    height,
+    pixels,
+    gridWidth,
+    gridHeight,
+    sectionWidth,
+    sectionHeight,
+    colorLimit,
+    mode,
+    palette,
+    backgroundColor,
+  } = event.data as {
     type: string;
     requestId: string;
     projectName?: string;
@@ -10,6 +25,10 @@ self.onmessage = (event) => {
     pixels: Uint8ClampedArray;
     gridWidth: number;
     gridHeight: number;
+    sectionWidth?: number;
+    sectionHeight?: number;
+    colorLimit?: number;
+    mode?: 'balanced' | 'pixel-art';
     palette: Array<{ id: string; name: string; hex: string; rgb: { r: number; g: number; b: number } }>;
     backgroundColor?: string;
   };
@@ -25,6 +44,10 @@ self.onmessage = (event) => {
       pixels: new Uint8ClampedArray(pixels),
       gridWidth,
       gridHeight,
+      sectionWidth,
+      sectionHeight,
+      colorLimit,
+      mode,
       palette,
       backgroundColor: backgroundColor ?? '#ffffff',
     });
@@ -43,6 +66,11 @@ self.onmessage = (event) => {
         pixelHeight: height,
         gridWidth,
         gridHeight,
+        sectionWidth,
+        sectionHeight,
+        colorLimit,
+        mode,
+        selectedPaletteIds: palette.map((color) => color.id),
         palette: result.palette,
         materialList: result.materialList,
         cells: result.cells,
