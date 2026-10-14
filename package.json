@@ -1,0 +1,16 @@
+{
+  "name": "mosaic-workspace",
+  "private": true,
+  "version": "0.1.0",
+  "packageManager": "pnpm@9.15.0",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "pnpm --dir apps/mosaic-web dev",
+    "build": "pnpm --dir apps/mosaic-web build",
+    "test": "pnpm --dir packages/mosaic-core test",
+    "typecheck": "pnpm --dir packages/mosaic-core build && pnpm -r --filter ./packages/mosaic-core --filter ./apps/mosaic-web exec tsc --noEmit"
+  }
+}
