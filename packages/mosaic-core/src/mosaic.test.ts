@@ -148,12 +148,64 @@ describe('mosaic core', () => {
     expect(mosaic.materialList.reduce((sum, item) => sum + item.count, 0)).toBe(8);
   });
 
+  it('preserves locked cell colors and reserves them within the color limit', () => {
+    const palette = [
+      { id: 'red', name: 'Red', hex: '#ff0000', rgb: { r: 255, g: 0, b: 0 } },
+      { id: 'blue', name: 'Blue', hex: '#0000ff', rgb: { r: 0, g: 0, b: 255 } },
+    ];
+    const mosaic = generateMosaicFromPixels({
+      width: 2,
+      height: 1,
+      pixels: new Uint8ClampedArray([0, 0, 255, 255, 0, 0, 255, 255]),
+      gridWidth: 2,
+      gridHeight: 1,
+      palette,
+      colorLimit: 1,
+      mode: 'pixel-art',
+      lockedCells: [{
+        id: 'cell-0-0',
+        x: 0,
+        y: 0,
+        colorId: 'red',
+        rgb: palette[0].rgb,
+        sectionId: 'section-0-0',
+        locked: true,
+      }],
+    });
+
+    expect(mosaic.cells.map((cell) => cell.colorId)).toEqual(['red', 'red']);
+    expect(mosaic.cells.map((cell) => cell.locked)).toEqual([true, false]);
+    expect(mosaic.materialList).toEqual([{ colorId: 'red', name: 'Red', hex: '#ff0000', count: 2 }]);
+  });
+
+  it('rejects locked cells that require more colors than the configured limit', () => {
+    const palette = [
+      { id: 'red', name: 'Red', hex: '#ff0000', rgb: { r: 255, g: 0, b: 0 } },
+      { id: 'blue', name: 'Blue', hex: '#0000ff', rgb: { r: 0, g: 0, b: 255 } },
+    ];
+
+    expect(() => generateMosaicFromPixels({
+      width: 2,
+      height: 1,
+      pixels: new Uint8ClampedArray([0, 0, 255, 255, 0, 0, 255, 255]),
+      gridWidth: 2,
+      gridHeight: 1,
+      palette,
+      colorLimit: 1,
+      mode: 'pixel-art',
+      lockedCells: [
+        { id: 'cell-0-0', x: 0, y: 0, colorId: 'red', rgb: palette[0].rgb, sectionId: 'section-0-0', locked: true },
+        { id: 'cell-1-0', x: 1, y: 0, colorId: 'blue', rgb: palette[1].rgb, sectionId: 'section-0-0', locked: true },
+      ],
+    })).toThrow(/LOCK_CONFLICT/);
+  });
+
   it('applies a color replacement and keeps material totals consistent', () => {
     const palette = buildDemoPalette();
     const cells = [
-      { id: 'cell-0', x: 0, y: 0, colorId: 'A01', rgb: { r: 15, g: 23, b: 42 }, sectionId: 'section-0-0' },
-      { id: 'cell-1', x: 1, y: 0, colorId: 'A01', rgb: { r: 15, g: 23, b: 42 }, sectionId: 'section-0-0' },
-      { id: 'cell-2', x: 2, y: 0, colorId: 'A02', rgb: { r: 29, g: 78, b: 216 }, sectionId: 'section-0-0' },
+      { id: 'cell-0', x: 0, y: 0, colorId: 'A01', rgb: { r: 15, g: 23, b: 42 }, sectionId: 'section-0-0', locked: false },
+      { id: 'cell-1', x: 1, y: 0, colorId: 'A01', rgb: { r: 15, g: 23, b: 42 }, sectionId: 'section-0-0', locked: false },
+      { id: 'cell-2', x: 2, y: 0, colorId: 'A02', rgb: { r: 29, g: 78, b: 216 }, sectionId: 'section-0-0', locked: false },
     ];
 
     const updated = applyColorReplacement({

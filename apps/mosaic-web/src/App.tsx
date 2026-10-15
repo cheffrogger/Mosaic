@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useRef, useState, type ChangeEvent } from 'react';
-import { applyColorReplacement, buildAdaptivePaletteFromPixels, buildDemoPalette, calculateCropRect, cropImageData, type MaterialItem, type PaletteColor } from '@mosaic/core';
+import { useEffect, useMemo, useRef, useState, type ChangeEvent, type KeyboardEvent, type MouseEvent } from 'react';
+import { applyColorReplacement, buildAdaptivePaletteFromPixels, buildDemoPalette, buildMaterialList, calculateCropRect, cropImageData, type MaterialItem, type MosaicCell, type PaletteColor } from '@mosaic/core';
 
 const DEFAULT_GRID_WIDTH = 32;
 const DEFAULT_GRID_HEIGHT = 32;
@@ -9,6 +9,19 @@ const DEFAULT_COLOR_LIMIT = 8;
 const DEMO_PALETTE = buildDemoPalette();
 const DB_NAME = 'mosaic-projects';
 const STORE_NAME = 'projects';
+
+function createId() {
+  if (typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID();
+  }
+
+  const bytes = new Uint8Array(16);
+  crypto.getRandomValues(bytes);
+  bytes[6] = (bytes[6] & 0x0f) | 0x40;
+  bytes[8] = (bytes[8] & 0x3f) | 0x80;
+  const hex = Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('');
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+}
 
 export type SavedProject = {
   id: string;
@@ -29,7 +42,7 @@ export type SavedProject = {
   selectedPaletteIds: string[];
   palette: PaletteColor[];
   materialList: MaterialItem[];
-  cells: Array<{ id: string; x: number; y: number; colorId: string; rgb: { r: number; g: number; b: number }; sectionId: string }>;
+  cells: MosaicCell[];
   sections: Array<{ id: string; startX: number; startY: number; width: number; height: number; cellCount: number }>;
 };
 
@@ -66,7 +79,13 @@ async function loadProjects(): Promise<SavedProject[]> {
     const transaction = database.transaction(STORE_NAME, 'readonly');
     const store = transaction.objectStore(STORE_NAME);
     const request = store.getAll();
-    request.onsuccess = () => resolve((request.result ?? []) as SavedProject[]);
+    request.onsuccess = () => {
+      const records = (request.result ?? []) as SavedProject[];
+      resolve(records.map((record) => ({
+        ...record,
+        cells: (record.cells ?? []).map((cell) => ({ ...cell, locked: cell.locked === true })),
+      })));
+    };
     request.onerror = () => reject(request.error ?? new Error('Project load failed'));
   });
 }
@@ -99,7 +118,7 @@ function rgbToHex({ r, g, b }: { r: number; g: number; b: number }) {
   return `#${toHex(r)}${toHex(g)}${toHex(b)}`;
 }
 
-function drawMosaicPreview(canvas: HTMLCanvasElement | null, cells: SavedProject['cells'] | undefined, gridWidth: number, gridHeight: number) {
+function drawMosaicPreview(canvas: HTMLCanvasElement | null, cells: SavedProject['cells'] | undefined, gridWidth: number, gridHeight: number, selectedCellId: string | null) {
   if (!canvas || !cells || cells.length === 0) {
     return;
   }
@@ -118,6 +137,12 @@ function drawMosaicPreview(canvas: HTMLCanvasElement | null, cells: SavedProject
     const y = cell.y * cellHeight;
     context.fillStyle = rgbToHex(cell.rgb);
     context.fillRect(x, y, cellWidth + 0.5, cellHeight + 0.5);
+
+    if (cell.locked || cell.id === selectedCellId) {
+      context.strokeStyle = cell.id === selectedCellId ? '#e68756' : 'rgba(32, 49, 43, 0.9)';
+      context.lineWidth = cell.id === selectedCellId ? 2 : 1;
+      context.strokeRect(x + 0.5, y + 0.5, Math.max(cellWidth - 1, 0.5), Math.max(cellHeight - 1, 0.5));
+    }
   });
 }
 
@@ -157,7 +182,7 @@ function createBaseProjectFromImage({
 }): SavedProject {
   const projectName = fileName.replace(/\.[^.]+$/, '') || 'Generated mosaic';
   return {
-    id: crypto.randomUUID(),
+    id: createId(),
     name: projectName,
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
@@ -184,6 +209,7 @@ export default function App() {
   const workerRef = useRef<Worker | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const [project, setProject] = useState<SavedProject | null>(null);
+  const [selectedCellId, setSelectedCellId] = useState<string | null>(null);
   const [savedProjects, setSavedProjects] = useState<SavedProject[]>([]);
   const [history, setHistory] = useState<SavedProject[]>([]);
   const [status, setStatus] = useState('Load a local image to start the mosaic flow.');
@@ -218,6 +244,7 @@ export default function App() {
 
       if (type === 'result' && result) {
         setProject(result);
+        setSelectedCellId((current) => result.cells.some((cell) => cell.id === current) ? current : result.cells[0]?.id ?? null);
         setStatus(`Generated ${result.gridWidth}×${result.gridHeight} mosaic with ${result.materialList.reduce((sum, item) => sum + item.count, 0)} cells.`);
         setIsGenerating(false);
       }
@@ -232,8 +259,8 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    drawMosaicPreview(canvasRef.current, project?.cells, project?.gridWidth ?? gridWidth, project?.gridHeight ?? gridHeight);
-  }, [project, gridWidth, gridHeight]);
+    drawMosaicPreview(canvasRef.current, project?.cells, project?.gridWidth ?? gridWidth, project?.gridHeight ?? gridHeight, selectedCellId);
+  }, [project, gridWidth, gridHeight, selectedCellId]);
 
   const materialTotal = useMemo(() => project?.materialList.reduce((sum, item) => sum + item.count, 0) ?? 0, [project]);
   const activePalette = useMemo(() => imagePalette.filter((color) => selectedPaletteIds.includes(color.id)), [imagePalette, selectedPaletteIds]);
@@ -323,12 +350,14 @@ export default function App() {
     projectName,
     previewUrl,
     readyProject,
+    lockedCells,
   }: {
     imageData: ImageData;
     sourceName: string;
     projectName: string;
     previewUrl?: string;
     readyProject?: SavedProject;
+    lockedCells?: MosaicCell[];
   }) => {
     const worker = workerRef.current;
     if (!worker) {
@@ -346,11 +375,13 @@ export default function App() {
 
     const payload = {
       type: 'generate',
-      requestId: crypto.randomUUID(),
+      requestId: createId(),
       projectName,
       width: workingImageData.width,
       height: workingImageData.height,
       pixels: workingImageData.data,
+      sourceImageUrl: readyProject?.sourceImageUrl ?? previewUrl ?? project?.sourceImageUrl ?? '',
+      lockedCells,
       gridWidth,
       gridHeight,
       sectionWidth,
@@ -474,6 +505,9 @@ export default function App() {
 
     const sourceName = project.sourceName ?? 'Generated mosaic';
     const projectName = project.name || sourceName.replace(/\.[^.]+$/, '') || 'Generated mosaic';
+    const lockedCells = project.gridWidth === gridWidth && project.gridHeight === gridHeight
+      ? project.cells.filter((cell) => cell.locked)
+      : [];
     generationSignatureRef.current = JSON.stringify({
       imageWidth: lastImageData.width,
       imageHeight: lastImageData.height,
@@ -490,7 +524,7 @@ export default function App() {
     });
     const nextProject = {
       ...project,
-      id: crypto.randomUUID(),
+      id: createId(),
       name: projectName,
       updatedAt: new Date().toISOString(),
       crop: effectiveCrop ?? project.crop,
@@ -512,6 +546,7 @@ export default function App() {
       projectName,
       previewUrl: project.sourceImageUrl,
       readyProject: nextProject,
+      lockedCells,
     });
   };
 
@@ -573,8 +608,10 @@ export default function App() {
         cells: payload.cells ?? [],
         sections: payload.sections ?? [],
       } as SavedProject;
+      record.cells = record.cells.map((cell) => ({ ...cell, locked: cell.locked === true }));
 
       setProject(record);
+      setSelectedCellId(record.cells[0]?.id ?? null);
       setLastImageData(null);
       setGridWidth(record.gridWidth);
       setGridHeight(record.gridHeight);
@@ -612,6 +649,74 @@ export default function App() {
     setStatus(`Replaced ${replacementSourceId} with ${replacementTargetId}.`);
   };
 
+  const selectedCell = project?.cells.find((cell) => cell.id === selectedCellId);
+
+  const handleMosaicClick = (event: MouseEvent<HTMLCanvasElement>) => {
+    if (!project) {
+      return;
+    }
+
+    const bounds = event.currentTarget.getBoundingClientRect();
+    const x = Math.min(project.gridWidth - 1, Math.max(0, Math.floor(((event.clientX - bounds.left) / bounds.width) * project.gridWidth)));
+    const y = Math.min(project.gridHeight - 1, Math.max(0, Math.floor(((event.clientY - bounds.top) / bounds.height) * project.gridHeight)));
+    const cell = project.cells.find((item) => item.x === x && item.y === y);
+    if (cell) {
+      setSelectedCellId(cell.id);
+    }
+  };
+
+  const handleMosaicKeyDown = (event: KeyboardEvent<HTMLCanvasElement>) => {
+    if (!project?.cells.length) {
+      return;
+    }
+
+    const current = selectedCell ?? project.cells[0];
+    let x = current.x;
+    let y = current.y;
+
+    if (event.key === 'ArrowLeft') x = Math.max(0, x - 1);
+    else if (event.key === 'ArrowRight') x = Math.min(project.gridWidth - 1, x + 1);
+    else if (event.key === 'ArrowUp') y = Math.max(0, y - 1);
+    else if (event.key === 'ArrowDown') y = Math.min(project.gridHeight - 1, y + 1);
+    else return;
+
+    event.preventDefault();
+    const nextCell = project.cells.find((cell) => cell.x === x && cell.y === y);
+    if (nextCell) {
+      setSelectedCellId(nextCell.id);
+    }
+  };
+
+  const handleSelectedCellColorChange = (event: ChangeEvent<HTMLSelectElement>) => {
+    if (!project || !selectedCell || selectedCell.locked) {
+      return;
+    }
+
+    const targetColor = project.palette.find((color) => color.id === event.target.value);
+    if (!targetColor || targetColor.id === selectedCell.colorId) {
+      return;
+    }
+
+    const cells = project.cells.map((cell) => cell.id === selectedCell.id
+      ? { ...cell, colorId: targetColor.id, rgb: { ...targetColor.rgb } }
+      : cell);
+    setHistory((current) => [...current.slice(-9), project]);
+    setProject({ ...project, cells, materialList: buildMaterialList(cells, project.palette), updatedAt: new Date().toISOString() });
+    setStatus(`Changed cell ${selectedCell.y + 1}, ${selectedCell.x + 1} to ${targetColor.name}.`);
+  };
+
+  const handleToggleSelectedCellLock = () => {
+    if (!project || !selectedCell) {
+      return;
+    }
+
+    const locked = !selectedCell.locked;
+    const cells = project.cells.map((cell) => cell.id === selectedCell.id ? { ...cell, locked } : cell);
+    setHistory((current) => [...current.slice(-9), project]);
+    setProject({ ...project, cells, updatedAt: new Date().toISOString() });
+    setStatus(`${locked ? 'Locked' : 'Unlocked'} cell ${selectedCell.y + 1}, ${selectedCell.x + 1}.`);
+  };
+
   const handleSave = async () => {
     if (!project) {
       return;
@@ -621,7 +726,7 @@ export default function App() {
       setStatus('Saving local project...');
       const saved = {
         ...project,
-        id: project.id || crypto.randomUUID(),
+        id: project.id || createId(),
         updatedAt: new Date().toISOString(),
         crop: effectiveCrop ?? project.crop,
         gridWidth,
@@ -671,6 +776,7 @@ export default function App() {
       palette: record.selectedPaletteIds && record.selectedPaletteIds.length ? record.selectedPaletteIds : DEMO_PALETTE.map((color) => color.id),
     });
     setProject(record);
+    setSelectedCellId(record.cells[0]?.id ?? null);
     setStatus(`Opened ${record.name} from local storage.`);
   };
 
@@ -792,29 +898,71 @@ export default function App() {
 
         <div className="panel">
           <h2>{headingLabel} mosaic</h2>
-          <canvas ref={canvasRef} width={320} height={320} className="mosaic-canvas" />
+          <canvas
+            ref={canvasRef}
+            width={320}
+            height={320}
+            className="mosaic-canvas"
+            role="grid"
+            aria-label="Mosaic grid"
+            aria-describedby="selected-cell-description"
+            aria-rowcount={project?.gridHeight ?? gridHeight}
+            aria-colcount={project?.gridWidth ?? gridWidth}
+            tabIndex={project ? 0 : -1}
+            onClick={handleMosaicClick}
+            onKeyDown={handleMosaicKeyDown}
+          />
           {project && (
             <div className="summary-line">
               <span>{materialTotal} tiles required</span>
               <span>{project.materialList.length} colors used</span>
             </div>
           )}
+          <div className="cell-editor" aria-live="polite">
+            {selectedCell && project ? (
+              <>
+                <p id="selected-cell-description">
+                  Cell {selectedCell.y + 1}, {selectedCell.x + 1} · {project.palette.find((color) => color.id === selectedCell.colorId)?.name ?? selectedCell.colorId}{selectedCell.locked ? ' · locked' : ''}
+                </p>
+                <div className="controls-grid narrow">
+                  <label>
+                    Selected cell color
+                    <select aria-label="Selected cell color" value={selectedCell.colorId} disabled={selectedCell.locked} onChange={handleSelectedCellColorChange}>
+                      {project.palette.map((color) => (
+                        <option key={color.id} value={color.id}>{color.name}</option>
+                      ))}
+                    </select>
+                  </label>
+                  <button type="button" onClick={handleToggleSelectedCellLock}>
+                    {selectedCell.locked ? 'Unlock cell' : 'Lock cell'}
+                  </button>
+                </div>
+              </>
+            ) : (
+              <p id="selected-cell-description">Select a cell on the mosaic to edit it.</p>
+            )}
+          </div>
         </div>
       </section>
 
       <section className="bottom-grid">
         <div className="panel">
-          <h3>Demo palette (local only)</h3>
-          <div className="palette-grid">
-            {imagePalette.map((color: PaletteColor) => (
-              <label key={color.id} className="swatch-row clickable">
-                <input type="checkbox" checked={selectedPaletteIds.includes(color.id)} onChange={() => togglePaletteColor(color.id)} />
-                <span className="swatch" style={{ backgroundColor: color.hex }} />
-                <span>{color.name}</span>
-                <code>{color.hex}</code>
-              </label>
-            ))}
-          </div>
+          <details className="palette-disclosure">
+            <summary>
+              <span>Demo palette (local only)</span>
+              <span className="palette-count">{activePalette.length} selected</span>
+            </summary>
+            <div className="palette-grid">
+              {imagePalette.map((color: PaletteColor) => (
+                <label key={color.id} className="swatch-row clickable">
+                  <input type="checkbox" checked={selectedPaletteIds.includes(color.id)} onChange={() => togglePaletteColor(color.id)} />
+                  <span className="swatch" style={{ backgroundColor: color.hex }} />
+                  <span>{color.name}</span>
+                  <code>{color.hex}</code>
+                </label>
+              ))}
+            </div>
+          </details>
         </div>
 
         <div className="panel">

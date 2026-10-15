@@ -18,6 +18,7 @@ export type MosaicCell = {
   colorId: string;
   rgb: RGBColor;
   sectionId: string;
+  locked: boolean;
 };
 
 export type MaterialItem = {
@@ -201,6 +202,7 @@ export type GenerateMosaicOptions = {
   sectionHeight?: number;
   colorLimit?: number;
   mode?: GenerationMode;
+  lockedCells?: MosaicCell[];
 };
 
 export function buildDemoPalette(): PaletteColor[] {
@@ -344,6 +346,7 @@ export function generateMosaicFromPixels({
   sectionHeight,
   colorLimit,
   mode = 'balanced',
+  lockedCells = [],
 }: GenerateMosaicOptions): MosaicResult {
   if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) {
     throw new Error('Invalid image size');
@@ -374,9 +377,49 @@ export function generateMosaicFromPixels({
   const materialMap = new Map<string, MaterialItem>();
   const background = hexToRgb(backgroundColor);
   const preliminaryColors: string[] = [];
+  const paletteById = new Map(palette.map((color) => [color.id, color]));
+  const lockedCellsByIndex = new Map<number, MosaicCell>();
+  const lockedColorIds = new Set<string>();
+
+  for (const cell of lockedCells) {
+    if (!cell.locked) {
+      continue;
+    }
+
+    const color = paletteById.get(cell.colorId);
+    if (!Number.isInteger(cell.x) || !Number.isInteger(cell.y) || cell.x < 0 || cell.x >= gridWidth || cell.y < 0 || cell.y >= gridHeight || !color) {
+      throw new Error('LOCK_CONFLICT: a locked cell does not match the current grid or palette');
+    }
+
+    const index = cell.y * gridWidth + cell.x;
+    if (lockedCellsByIndex.has(index)) {
+      throw new Error('LOCK_CONFLICT: multiple locked cells occupy the same grid position');
+    }
+
+    lockedCellsByIndex.set(index, cell);
+    lockedColorIds.add(color.id);
+  }
 
   for (let y = 0; y < gridHeight; y += 1) {
     for (let x = 0; x < gridWidth; x += 1) {
+      const sectionId = sections.find((section) => x >= section.startX && x < section.startX + section.width && y >= section.startY && y < section.startY + section.height)?.id ?? sections[0]?.id ?? 'section-0-0';
+      const lockedCell = lockedCellsByIndex.get(y * gridWidth + x);
+
+      if (lockedCell) {
+        const color = paletteById.get(lockedCell.colorId)!;
+        preliminaryColors.push(color.id);
+        cells.push({
+          id: `cell-${x}-${y}`,
+          x,
+          y,
+          colorId: color.id,
+          rgb: { ...color.rgb },
+          sectionId,
+          locked: true,
+        });
+        continue;
+      }
+
       const sampledColor = sampleCellColor({
         x,
         y,
@@ -390,7 +433,6 @@ export function generateMosaicFromPixels({
       });
       const nearest = findClosestPaletteColor(sampledColor, palette);
       preliminaryColors.push(nearest.id);
-      const sectionId = sections.find((section) => x >= section.startX && x < section.startX + section.width && y >= section.startY && y < section.startY + section.height)?.id ?? sections[0]?.id ?? 'section-0-0';
 
       cells.push({
         id: `cell-${x}-${y}`,
@@ -399,14 +441,19 @@ export function generateMosaicFromPixels({
         colorId: nearest.id,
         rgb: nearest.rgb,
         sectionId,
+        locked: false,
       });
     }
   }
 
-  const activePaletteIds = selectPaletteIds(preliminaryColors, palette, colorLimit);
+  const activePaletteIds = selectPaletteIds(preliminaryColors, palette, colorLimit, lockedColorIds);
   const activePalette = palette.filter((color) => activePaletteIds.has(color.id));
 
   for (const cell of cells) {
+    if (cell.locked) {
+      continue;
+    }
+
     const activeColor = findClosestPaletteColor(cell.rgb, activePalette);
     cell.colorId = activeColor.id;
     cell.rgb = activeColor.rgb;
@@ -590,7 +637,7 @@ function sampleCellColor({
   };
 }
 
-function selectPaletteIds(preliminaryColors: string[], palette: PaletteColor[], colorLimit?: number): Set<string> {
+function selectPaletteIds(preliminaryColors: string[], palette: PaletteColor[], colorLimit?: number, lockedColorIds = new Set<string>()): Set<string> {
   const counts = new Map<string, number>();
   const orderMap = new Map<string, number>();
 
@@ -600,6 +647,10 @@ function selectPaletteIds(preliminaryColors: string[], palette: PaletteColor[], 
   });
 
   const limit = colorLimit && colorLimit > 0 ? Math.min(colorLimit, palette.length) : palette.length;
+  if (lockedColorIds.size > limit) {
+    throw new Error(`LOCK_CONFLICT: ${lockedColorIds.size} locked colors exceed the limit of ${limit}`);
+  }
+
   const orderedIds = [...counts.entries()].sort((left, right) => {
     if (right[1] !== left[1]) {
       return right[1] - left[1];
@@ -607,7 +658,7 @@ function selectPaletteIds(preliminaryColors: string[], palette: PaletteColor[], 
     return (orderMap.get(left[0]) ?? 0) - (orderMap.get(right[0]) ?? 0);
   }).map(([id]) => id);
 
-  const selected = new Set<string>();
+  const selected = new Set(lockedColorIds);
   for (const id of orderedIds) {
     if (selected.size >= limit) {
       break;

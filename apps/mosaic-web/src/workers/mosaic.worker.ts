@@ -1,4 +1,4 @@
-import { generateMosaicFromPixels } from '@mosaic/core';
+import { generateMosaicFromPixels, type MosaicCell } from '@mosaic/core';
 
 self.onmessage = (event) => {
   const {
@@ -8,6 +8,8 @@ self.onmessage = (event) => {
     width,
     height,
     pixels,
+    sourceImageUrl,
+    lockedCells,
     gridWidth,
     gridHeight,
     sectionWidth,
@@ -23,6 +25,8 @@ self.onmessage = (event) => {
     width: number;
     height: number;
     pixels: Uint8ClampedArray;
+    sourceImageUrl?: string;
+    lockedCells?: MosaicCell[];
     gridWidth: number;
     gridHeight: number;
     sectionWidth?: number;
@@ -48,6 +52,7 @@ self.onmessage = (event) => {
       sectionHeight,
       colorLimit,
       mode,
+      lockedCells,
       palette,
       backgroundColor: backgroundColor ?? '#ffffff',
     });
@@ -60,7 +65,7 @@ self.onmessage = (event) => {
         name: projectName || 'Generated mosaic',
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
-        sourceImageUrl: '',
+        sourceImageUrl: sourceImageUrl ?? '',
         sourceName: projectName || 'Generated mosaic',
         pixelWidth: width,
         pixelHeight: height,

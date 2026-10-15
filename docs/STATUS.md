@@ -1,6 +1,6 @@
 # Status — v0.2
 
-Stand: 2026-10-14 · Phase M3: lokaler Workflow erweitert, Bildausschnitt und Zoom respektieren das Originalformat, und alle relevanten Steuerungen aktualisieren das Mosaik automatisch im Live-Workflow.
+Stand: 2026-10-15 · M3 abgeschlossen: responsive Arbeitsfläche, mobile Zellbearbeitung, Sperrenerhalt bei Neuberechnung und lokalem Roundtrip umgesetzt.
 
 ## Implementiert
 
@@ -11,13 +11,23 @@ Stand: 2026-10-14 · Phase M3: lokaler Workflow erweitert, Bildausschnitt und Zo
 - IndexedDB-Project-Store mit Laden und erneutem Öffnen in [apps/mosaic-web/src/App.tsx](../apps/mosaic-web/src/App.tsx)
 - M1-, M2- und M3-UI- sowie Browser-Smoke-Tests inklusive Fixtures im Browser-Verzeichnis
 - Bildausschnitt-/Zoom-Logik mit Seitenverhältnis-Schutz und automatischer Neuberechnung in [packages/mosaic-core/src/index.ts](../packages/mosaic-core/src/index.ts)
+- Worker-Ergebnisse erhalten die geladene Quellbild-URL; das Quellbild bleibt nach der Mosaikgenerierung sichtbar
+- UUID-v4-Fallback über `crypto.getRandomValues` unterstützt Bildgenerierung und Projektaktionen auf Mobilgeräten im unsicheren HTTP-LAN-Kontext
+- Canvas-Zellwahl per Tap/Klick und Pfeiltasten, manuelle Farbänderung mit aktualisierter Materialliste und Lock/Unlock
+- Gesperrte Zellen samt Farben werden bei gleicher Rastergeometrie in den Worker übernommen; gesperrte Farben zählen gegen K, unlösbare Konflikte liefern `LOCK_CONFLICT`
+- Sperrstatus wird in IndexedDB und JSON-Dateien gespeichert; ältere Projektzellen ohne `locked` werden als entsperrt normalisiert
+- Zellposition, Farbname und Sperrstatus erscheinen in der zugänglichen Statusregion
+- Responsive Arbeitsfläche mit gruppierten Controls, nebeneinanderliegenden Desktop-Vorschauen, mobilem Einspaltenlayout und einklappbarer Palette
+- Playwright-Abdeckung für Worker-Roundtrip des Quellbilds sowie 320-px-, Mobile- und Tablet-Layouts
 
 ## Verifiziert
 
 - `pnpm --dir packages/mosaic-core test` → 3/3 Tests erfolgreich; M1- und M2-Logik verifiziert
 - `pnpm typecheck` → erfolgreich, keine TypeScript-Fehler in Core oder Web-App
 - `pnpm build` → Produktionsbuild erfolgreich gebaut; Vite erzeugte die dist-Ausgabe
-- `pnpm --dir apps/mosaic-web exec playwright test --reporter=list` → 2 Browser-Smoke-Tests bestanden
+- `pnpm --dir apps/mosaic-web exec playwright test --reporter=list` → 7 Browser-Smoke-Tests bestanden, darunter UUID-Fallback, Touch-/Tastaturauswahl, Zelländerung, Sperr-/Roundtrip und responsive Viewports bis 320 px
+- `pnpm typecheck` → Core und Web-App ohne TypeScript-Fehler
+- `pnpm build` → Produktionsbuild erfolgreich gebaut
 
 ## Aktueller Scope
 
@@ -29,7 +39,7 @@ Der aktuelle Slice umfasst:
 
 ## Nächster sinnvoller Schritt
 
-M3 mit stärkerem UX- und Produkt-Polish fortsetzen: live Auto-Refresh bei Steuerungsänderungen, Katalog-/Palette-Editor, bessere Fehlermeldungen, Projekt-Umbenennung, Projekt-Löschung und weitere Validierungen. Die fachliche Abnahme für M1/M2 ist mit funktionierendem lokaler Ablauf, Core-Tests und Browser-Smoke erfüllt; M4 beginnt erst mit den nächsten Produkt- und Offline-Abnahmen.
+M4 beginnen: PDF/PNG/CSV-Export, Offline-End-to-End und vollständige Geräte-/Accessibility-Abnahme. Das responsive Layout und die Zellsteuerung sind implementiert, ersetzen aber keine Offline-, Screenreader- oder echten Geräteprüfungen.
 
 ## Pflege
 
